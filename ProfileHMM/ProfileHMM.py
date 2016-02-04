@@ -1,12 +1,18 @@
-from collections import Counter
-from argument_parser import parseme
-from numba import jit
-from numpy import array
-from math import log
-from tictoc import *
-import numpy as np
-np.set_printoptions(linewidth=140, precision=4)
+# external Libraries
+try:
+    from numba import jit
+    import numpy as np
+    np.set_printoptions(linewidth=140, precision=4)
+except ImportError:
+    print('Seems you do not have numpy or numba. Too bad - Exiting...')
 
+# python modules
+from collections import Counter
+from math import log
+
+# package imports
+from .argument_parser import parseme
+from .tictoc import *
 
 class HMM:
     """docstring for HMM"""
@@ -182,26 +188,3 @@ class HMM:
             transmissions[t3] /= abs_occurence
 
         return np.vstack(transmissions[t] for t in transmission_list)
-
-
-def read(rfile):
-    MSA = []
-    with rfile as train_data:
-        for line in train_data.readlines():
-            if line.startswith('>'):
-                continue
-            MSA.append(np.array(list(line.strip())))
-    return np.array(MSA)
-
-traindata, testdata = parseme()
-
-# read drom fasta data and set some basic values
-MSA = read(traindata)
-HMM_MSA = HMM(MSA)
-
-with testdata as full:
-    for i, line in enumerate(full.readlines()):
-        if line.startswith('>'):
-            continue
-        print(i // 2 + 1, line[:30], end='\t')
-        print(HMM_MSA.viterbi(line))
