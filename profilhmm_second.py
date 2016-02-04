@@ -1,9 +1,10 @@
 from collections import Counter
+from numba import jit
 from numpy import array
 from math import log
 from tictoc import *
 import numpy as np
-np.set_printoptions(linewidth=100, precision=4)
+np.set_printoptions(linewidth=140, precision=4)
 
 
 def read(rfile='../Daten/LSU_train.fasta'):
@@ -21,11 +22,13 @@ def equal_parts(l, n):
     for i in range(0, len(l), n):
         yield l[i:i+n]
 
-
+@jit
 def boolify(array2d):
     boolarray = np.ndarray(shape=array2d.shape)
     boolarray = array2d != '-'
     return boolarray
+
+def extract_basics(MSA):
 
 # read drom fasta data and set some basic values
 MSA = read()
@@ -36,6 +39,9 @@ MSAchar = [char for char in np.unique(MSA) if char != '-']
 alignment_number, alignment_length = MSA.shape
 match_states = [Counter(column)['-'] < alignment_number//2 for column in MSA.T]
 n = Counter(match_states)[True]
+
+def calculate_emissions(MSA, match_states):
+    pass
 
 emissions_from_M = {char: np.zeros(n) for char in MSAchar}
 emissions_from_I = {char: np.zeros(n+1) for char in MSAchar}
@@ -127,14 +133,12 @@ for c in MSAchar:
     # print(c, emissions_from_M[c])
     # print(c, emissions_from_I[c])
 
-for transm in transmission_list:
-    if transmissions[transm][transmissions[transm] < 0].size:
-        print(transmissions[transm][transmissions[transm] < 0])
-        print(transm)
+transmissions    = np.vstack(transmissions[t] for t in transmission_list)
+emissions_from_M = np.vstack(emissions_from_M[c] for c in MSAchar)
+emissions_from_I = np.vstack(emissions_from_I[c] for c in MSAchar)
 
-
+@jit(nopython=True)
 def viterbi(x, e_M, e_I, a, L, q):
-    x = np.array(list(x))
     N = x.size
 
     V_M = np.zeros((N, L+1))
@@ -143,21 +147,19 @@ def viterbi(x, e_M, e_I, a, L, q):
 
     for i in range(N):
         for j in range(1, L+1):
-            # print(i,j)
-            # print(a['M->M'][j-1])
             V_M[i, j] = log(e_M[x[i]][j-1] / q) + \
-                max(V_M[i-1][j-1] + log(a['M->M'][j-1]),
-                    V_I[i-1][j-1] + log(a['I->M'][j-1]),
-                    V_D[i-1][j-1] + log(a['D->M'][j-1]))
+                max(V_M[i-1][j-1] + log(a[0][j-1]),
+                    V_I[i-1][j-1] + log(a[1][j-1]),
+                    V_D[i-1][j-1] + log(a[2][j-1]))
 
             V_I[i, j] = log(e_I[x[i]][j-1] / q) + \
-                max(V_M[i-1][j] + log(a['M->I'][j]),
-                    V_I[i-1][j] + log(a['I->I'][j]),
-                    V_D[i-1][j] + log(a['D->I'][j]))
+                max(V_M[i-1][j] + log(a[3][j]),
+                    V_I[i-1][j] + log(a[4][j]),
+                    V_D[i-1][j] + log(a[5][j]))
 
-            V_D[i, j] = max(V_M[i][j-1] + log(a['M->D'][j-1]),
-                            V_I[i][j-1] + log(a['I->D'][j-1]),
-                            V_D[i][j-1] + log(a['D->D'][j-1]))
+            V_D[i, j] = max(V_M[i][j-1] + log(a[6][j-1]),
+                            V_I[i][j-1] + log(a[7][j-1]),
+                            V_D[i][j-1] + log(a[8][j-1]))
 
     return V_M[N-1, L]
 
@@ -165,5 +167,10 @@ with open('../Daten/LSU_full_test.fasta') as full:
     for line in full.readlines():
         if line.startswith('>'):
             continue
-        print(viterbi(line, emissions_from_M, emissions_from_I,
+        print(line[:30], end='\t')
+
+        char_to_int = {c : i for i, c in enumerate(MSAchar)}
+        x = np.array([char_to_int[c] for c in line.strip()])
+
+        print(viterbi(x, emissions_from_M, emissions_from_I,
                       transmissions, n, 1/len(char_count)))
