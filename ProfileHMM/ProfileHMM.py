@@ -7,6 +7,7 @@ from tictoc import *
 import numpy as np
 np.set_printoptions(linewidth=140, precision=4)
 
+
 class HMM:
     """docstring for HMM"""
     def __init__(self, MSA):
@@ -191,32 +192,6 @@ def read(rfile):
                 continue
             MSA.append(np.array(list(line.strip())))
     return np.array(MSA)
-
-@jit(nopython=True)
-def viterbi(x, e_M, e_I, a, L, q):
-    N = x.size
-
-    V_M = np.zeros((N, L+1))
-    V_I = np.zeros((N, L+1))
-    V_D = np.zeros((N, L+1))
-
-    for i in range(N):
-        for j in range(1, L+1):
-            V_M[i, j] = log(e_M[x[i]][j-1] / q) + \
-                max(V_M[i-1][j-1] + log(a[0][j-1]),
-                    V_I[i-1][j-1] + log(a[1][j-1]),
-                    V_D[i-1][j-1] + log(a[2][j-1]))
-
-            V_I[i, j] = log(e_I[x[i]][j-1] / q) + \
-                max(V_M[i-1][j] + log(a[3][j]),
-                    V_I[i-1][j] + log(a[4][j]),
-                    V_D[i-1][j] + log(a[5][j]))
-
-            V_D[i, j] = max(V_M[i][j-1] + log(a[6][j-1]),
-                            V_I[i][j-1] + log(a[7][j-1]),
-                            V_D[i][j-1] + log(a[8][j-1]))
-
-    return max(V_M[N-1, L], V_I[N-1, L], V_D[N-1, L])
 
 traindata, testdata = parseme()
 
