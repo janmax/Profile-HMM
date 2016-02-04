@@ -6,8 +6,145 @@ from tictoc import *
 import numpy as np
 np.set_printoptions(linewidth=140, precision=4)
 
+class HMM:
+    """docstring for HMM"""
+    def __init__(self, MSA):
+        self.MSA = MSA
+        self.MSAbool = self.boolify(MSA)
+        self.MSAchar = [char for char in np.unique(MSA) if char != '-']
+        self.alignment_number, self.alignment_length = MSA.shape
+        self.match_states = self.calc_match_states()
+        self.n = Counter(self.match_states)[True]
 
-def read(rfile='../Daten/LSU_train.fasta'):
+        # self.calc_emissons()
+        # self.calc_transmissions()
+
+    def __call__(self):
+        return self.calc_transmissions(), self.calc_emissons(), self.MSAchar, self.n
+
+    def calc_match_states(self):
+        return [Counter(column)['-'] < self.alignment_number//2 for column in self.MSA.T]
+
+    def equal_parts(self, l, n):
+        """Yield successive n-sized chunks from l."""
+        for i in range(0, len(l), n):
+            yield l[i:i+n]
+
+    @jit
+    def boolify(self, array2d):
+        boolarray = np.ndarray(shape=array2d.shape)
+        boolarray = array2d != '-'
+        return boolarray
+
+    def calc_emissons(self):
+        emissions_from_M = {char: np.zeros(self.n) for char in self.MSAchar}
+        emissions_from_I = {char: np.zeros(self.n+1) for char in self.MSAchar}
+
+        match_index = 0
+        for alignment, match in zip(self.MSA.T, self.match_states):
+            char_count = Counter(alignment)
+            if match:
+                for char in self.MSAchar:
+                    emissions_from_M[char][match_index] = char_count[char]
+                match_index += 1
+            if not match:
+                for char in self.MSAchar:
+                    emissions_from_I[char][match_index] += char_count[char]
+
+        for c in self.MSAchar:
+            emissions_from_M[c] += np.ones(self.n)
+            emissions_from_I[c] += np.ones(self.n+1)
+
+        M_sum = np.sum(list(emissions_from_M.values()), axis=0)
+        I_sum = np.sum(list(emissions_from_I.values()), axis=0)
+
+        for c in self.MSAchar:
+            emissions_from_M[c] /= M_sum
+            emissions_from_I[c] /= I_sum
+
+        return \
+            np.vstack(emissions_from_M[c] for c in self.MSAchar), \
+            np.vstack(emissions_from_I[c] for c in self.MSAchar)
+
+    def calc_transmissions(self):
+        transmission_list = [
+            'M->M', 'M->D', 'M->I', 'I->M', 'I->I', 'I->D', 'D->M', 'D->D', 'D->I']
+        transmissions = {t: np.zeros(self.n+1) for t in transmission_list}
+
+        first_row_char_count = Counter(self.MSAbool.T[0])
+        if self.match_states[0]:
+            transmissions['M->M'][0] = first_row_char_count[True]
+            transmissions['M->D'][0] = first_row_char_count[False]
+            transmissions['M->I'][0] = 0
+        else:
+            transmissions['I->M'][0] = first_row_char_count[True]
+            transmissions['I->I'][0] = first_row_char_count[False]
+
+        match_index = 1
+        for i, (alignment, alignment_next, match, match_next) in \
+                enumerate(
+                zip(self.MSAbool.T[:-1],    self.MSAbool.T[1:],
+                    self.match_states[:-1], self.match_states[1:])):
+            transmission_count = Counter(zip(alignment, alignment_next))
+            if match and match_next:
+                for booltrans, transm in zip(
+                    [(True, True), (True, False), (False, True), (False, False)],
+                    ['M->M',        'M->D',        'D->M',        'D->D']):
+                    transmissions[transm][match_index] = transmission_count[booltrans]
+                match_index += 1
+            if match and not match_next:
+                next_match = self.match_states.index(True, i)
+                empty_til_next = [not any(rest)for rest in self.MSAbool[:, i+2:next_match]]
+                transmission_count = Counter(zip(alignment_next, empty_til_next))
+                for booltrans, transm in zip(
+                    [(True, True), (True, False), (False, True), (False, False)],
+                    ['M->M',        'M->I',        'D->M',        'D->I']):
+                    transmissions[transm][match_index] += transmission_count[booltrans]
+            if not match and not match_next:
+                for booltrans, transm in zip(
+                    [(True, True), (True, False)],
+                    ['I->I',        'I->M']):
+                    transmissions[transm][match_index] += transmission_count[booltrans]
+            if not match and match_next:
+                for booltrans, transm in zip(
+                    [(True, True), (True, False)],
+                    ['I->M',        'I->D']):
+                    transmissions[transm][match_index] += transmission_count[booltrans]
+
+                transmissions['M->M'][match_index] = self.alignment_number - \
+                    transmissions['M->I'][match_index]
+                match_index += 1
+            if match_index == self.n:
+                # this is the end
+                if i + 2 == self.alignment_length:
+                    transmissions['M->M'][match_index] = self.alignment_number
+                else:
+                    empty_til_end = [not any(rest) for rest in self.MSAbool[:, i+2:]]
+                    transmission_count = Counter(zip(alignment_next, empty_til_end))
+                    for booltrans, transm in zip(
+                        [(True, True), (True, False), (False, True), (False, False)],
+                        ['M->M',        'M->I',        'D->M',        'D->I']):
+                        transmissions[transm][
+                            match_index] = transmission_count[booltrans]
+                    transmissions['I->M'][match_index] = self.alignment_number - \
+                        transmissions['M->M'][match_index]
+                break
+
+        # add one for laplaces rule
+        for t in transmission_list:
+            transmissions[t] += np.ones(self.n+1)
+
+        for t1, t2, t3 in self.equal_parts(transmission_list, 3):
+            abs_occurence = transmissions[t1] + \
+                transmissions[t2] + transmissions[t3]
+            transmissions[t1] /= abs_occurence
+            transmissions[t2] /= abs_occurence
+            transmissions[t3] /= abs_occurence
+
+        return np.vstack(transmissions[t] for t in transmission_list)
+
+
+def read(rfile):
     MSA = []
     with open(rfile) as train_data:
         for line in train_data.readlines():
@@ -17,125 +154,11 @@ def read(rfile='../Daten/LSU_train.fasta'):
     return np.array(MSA)
 
 
-def equal_parts(l, n):
-    """Yield successive n-sized chunks from l."""
-    for i in range(0, len(l), n):
-        yield l[i:i+n]
-
-@jit
-def boolify(array2d):
-    boolarray = np.ndarray(shape=array2d.shape)
-    boolarray = array2d != '-'
-    return boolarray
-
-def extract_basics(MSA):
-
 # read drom fasta data and set some basic values
-MSA = read()
-# MSA = read('small.txt')
-MSAbool = boolify(MSA)
-MSAchar = [char for char in np.unique(MSA) if char != '-']
+MSA = read('../Daten/LSU_train.fasta')
+HMM_MSA = HMM(MSA)
+transmissions, (emissions_from_M, emissions_from_I), MSAchar, n = HMM_MSA()
 
-alignment_number, alignment_length = MSA.shape
-match_states = [Counter(column)['-'] < alignment_number//2 for column in MSA.T]
-n = Counter(match_states)[True]
-
-def calculate_emissions(MSA, match_states):
-    pass
-
-emissions_from_M = {char: np.zeros(n) for char in MSAchar}
-emissions_from_I = {char: np.zeros(n+1) for char in MSAchar}
-
-match_index = 0
-for alignment, match in zip(MSA.T, match_states):
-    char_count = Counter(alignment)
-    if match:
-        for char in MSAchar:
-            emissions_from_M[char][match_index] = char_count[char]
-        match_index += 1
-    if not match:
-        for char in MSAchar:
-            emissions_from_I[char][match_index] += char_count[char]
-
-transmission_list = [
-    'M->M', 'M->D', 'M->I', 'I->M', 'I->I', 'I->D', 'D->M', 'D->D', 'D->I']
-transmissions = {t: np.zeros(n+1) for t in transmission_list}
-
-first_row_char_count = Counter(MSAbool.T[0])
-if match_states[0]:
-    transmissions['M->M'][0] = first_row_char_count[True]
-    transmissions['M->D'][0] = first_row_char_count[False]
-    transmissions['M->I'][0] = 0
-else:
-    transmissions['I->M'][0] = first_row_char_count[True]
-    transmissions['I->I'][0] = first_row_char_count[False]
-
-match_index = 1
-for i, (alignment, alignment_next, match, match_next) in \
-        enumerate(
-        zip(MSAbool.T[:-1], MSAbool.T[1:],
-            match_states[:-1], match_states[1:])):
-    transmission_count = Counter(zip(alignment, alignment_next))
-    if match and match_next:
-        for booltrans, transm in zip([(True, True), (True, False), (False, True), (False, False)], ['M->M', 'M->D', 'D->M', 'D->D']):
-            transmissions[transm][match_index] = transmission_count[booltrans]
-        match_index += 1
-    if match and not match_next:
-        next_match = match_states.index(True, i)
-        empty_til_next = [not any(rest) for rest in MSAbool[:, i+2:next_match]]
-        transmission_count = Counter(zip(alignment_next, empty_til_next))
-        for booltrans, transm in zip([(True, True), (True, False), (False, True), (False, False)], ['M->M', 'M->I', 'D->M', 'D->I']):
-            transmissions[transm][match_index] += transmission_count[booltrans]
-    if not match and not match_next:
-        for booltrans, transm in zip([(True, True), (True, False)], ['I->I', 'I->M']):
-            transmissions[transm][match_index] += transmission_count[booltrans]
-    if not match and match_next:
-        for booltrans, transm in zip([(True, True), (True, False)], ['I->M', 'I->D']):
-            transmissions[transm][match_index] += transmission_count[booltrans]
-        transmissions['M->M'][match_index] = alignment_number - \
-            transmissions['M->I'][match_index]
-        match_index += 1
-    if match_index == n:
-        if i + 2 == alignment_length:
-            transmissions['M->M'][match_index] = alignment_number
-        else:
-            empty_til_end = [not any(rest) for rest in MSAbool[:, i+2:]]
-            transmission_count = Counter(zip(alignment_next, empty_til_end))
-            for booltrans, transm in zip([(True, True), (True, False), (False, True), (False, False)], ['M->M', 'M->I', 'D->M', 'D->I']):
-                transmissions[transm][match_index] = transmission_count[booltrans]
-            transmissions['I->M'][match_index] = alignment_number - \
-                transmissions['M->M'][match_index]
-        break
-
-# add one for laplaces rule
-for t in transmission_list:
-    transmissions[t] += np.ones(n+1)
-
-for t1, t2, t3 in equal_parts(transmission_list, 3):
-    abs_occurence = transmissions[t1] + transmissions[t2] + transmissions[t3]
-    transmissions[t1] /= abs_occurence
-    transmissions[t2] /= abs_occurence
-    transmissions[t3] /= abs_occurence
-
-
-for c in MSAchar:
-    emissions_from_M[c] += np.ones(n)
-    emissions_from_I[c] += np.ones(n+1)
-
-M_sum = np.sum(list(emissions_from_M.values()), axis=0)
-I_sum = np.sum(list(emissions_from_I.values()), axis=0)
-
-# print(np.arange(n))
-for c in MSAchar:
-    emissions_from_M[c] /= M_sum
-    emissions_from_I[c] /= I_sum
-
-    # print(c, emissions_from_M[c])
-    # print(c, emissions_from_I[c])
-
-transmissions    = np.vstack(transmissions[t] for t in transmission_list)
-emissions_from_M = np.vstack(emissions_from_M[c] for c in MSAchar)
-emissions_from_I = np.vstack(emissions_from_I[c] for c in MSAchar)
 
 @jit(nopython=True)
 def viterbi(x, e_M, e_I, a, L, q):
@@ -161,16 +184,18 @@ def viterbi(x, e_M, e_I, a, L, q):
                             V_I[i][j-1] + log(a[7][j-1]),
                             V_D[i][j-1] + log(a[8][j-1]))
 
-    return V_M[N-1, L]
+    return max(V_M[N-1, L], V_I[N-1, L], V_D[N-1, L])
 
 with open('../Daten/LSU_full_test.fasta') as full:
     for line in full.readlines():
+        # break
         if line.startswith('>'):
             continue
         print(line[:30], end='\t')
 
-        char_to_int = {c : i for i, c in enumerate(MSAchar)}
+        char_to_int = {c: i for i, c in enumerate(MSAchar)}
         x = np.array([char_to_int[c] for c in line.strip()])
 
         print(viterbi(x, emissions_from_M, emissions_from_I,
-                      transmissions, n, 1/len(char_count)))
+                      transmissions, n, 1/4))
+
