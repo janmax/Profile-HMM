@@ -1,4 +1,5 @@
 from collections import Counter
+from argument_parser import parseme
 from numba import jit
 from numpy import array
 from math import log
@@ -16,11 +17,49 @@ class HMM:
         self.match_states = self.calc_match_states()
         self.n = Counter(self.match_states)[True]
 
-        # self.calc_emissons()
-        # self.calc_transmissions()
+        self.transmissions = self.calc_transmissions()
+        self.emissions_from_M, self.emissions_from_I = self.calc_emissons()
 
-    def __call__(self):
-        return self.calc_transmissions(), self.calc_emissons(), self.MSAchar, self.n
+    def viterbi(self, testdata):
+        char_to_int = {c: i for i, c in enumerate(self.MSAchar)}
+        testdata    = np.array([char_to_int[c] for c in testdata.strip()])
+
+        return self._viterbi(
+            testdata,
+            self.emissions_from_M,
+            self.emissions_from_I,
+            self.transmissions,
+            self.n,
+            1/len(self.MSAchar)
+        )
+
+    @staticmethod
+    @jit(nopython=True)
+    def _viterbi(x, e_M, e_I, a, L, q):
+        N = x.size
+
+        V_M = np.zeros((N, L+1))
+        V_I = np.zeros((N, L+1))
+        V_D = np.zeros((N, L+1))
+
+        for i in range(N):
+            for j in range(1, L+1):
+                V_M[i, j] = log(e_M[x[i]][j-1] / q) + \
+                    max(V_M[i-1][j-1] + log(a[0][j-1]),
+                        V_I[i-1][j-1] + log(a[1][j-1]),
+                        V_D[i-1][j-1] + log(a[2][j-1]))
+
+                V_I[i, j] = log(e_I[x[i]][j-1] / q) + \
+                    max(V_M[i-1][j] + log(a[3][j]),
+                        V_I[i-1][j] + log(a[4][j]),
+                        V_D[i-1][j] + log(a[5][j]))
+
+                V_D[i, j] = max(V_M[i][j-1] + log(a[6][j-1]),
+                                V_I[i][j-1] + log(a[7][j-1]),
+                                V_D[i][j-1] + log(a[8][j-1]))
+
+        return max(V_M[N-1, L], V_I[N-1, L], V_D[N-1, L])
+
 
     def calc_match_states(self):
         return [Counter(column)['-'] < self.alignment_number//2 for column in self.MSA.T]
@@ -146,19 +185,12 @@ class HMM:
 
 def read(rfile):
     MSA = []
-    with open(rfile) as train_data:
+    with rfile as train_data:
         for line in train_data.readlines():
             if line.startswith('>'):
                 continue
             MSA.append(np.array(list(line.strip())))
     return np.array(MSA)
-
-
-# read drom fasta data and set some basic values
-MSA = read('../Daten/LSU_train.fasta')
-HMM_MSA = HMM(MSA)
-transmissions, (emissions_from_M, emissions_from_I), MSAchar, n = HMM_MSA()
-
 
 @jit(nopython=True)
 def viterbi(x, e_M, e_I, a, L, q):
@@ -186,16 +218,15 @@ def viterbi(x, e_M, e_I, a, L, q):
 
     return max(V_M[N-1, L], V_I[N-1, L], V_D[N-1, L])
 
-with open('../Daten/LSU_full_test.fasta') as full:
-    for line in full.readlines():
-        # break
+traindata, testdata = parseme()
+
+# read drom fasta data and set some basic values
+MSA = read(traindata)
+HMM_MSA = HMM(MSA)
+
+with testdata as full:
+    for i, line in enumerate(full.readlines()):
         if line.startswith('>'):
             continue
-        print(line[:30], end='\t')
-
-        char_to_int = {c: i for i, c in enumerate(MSAchar)}
-        x = np.array([char_to_int[c] for c in line.strip()])
-
-        print(viterbi(x, emissions_from_M, emissions_from_I,
-                      transmissions, n, 1/4))
-
+        print(i // 2 + 1, line[:30], end='\t')
+        print(HMM_MSA.viterbi(line))
