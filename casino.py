@@ -1,4 +1,4 @@
-
+from math import log
 
 def viterbi(obs, states, start_p, trans_p, emit_p):
     V = [start_p]
@@ -18,7 +18,7 @@ def viterbi(obs, states, start_p, trans_p, emit_p):
         # don't need to remember the old paths
         path = newpath
 
-    # return the most likely sequence over the given time frame
+    # return the most likely sequence over the given time frame (backtrace)
     n = len(obs) - 1
 
     (prob, state) = max((V[n][y], y) for y in states)
@@ -30,14 +30,14 @@ def main():
 
     # read the generated rolls
     with open('../Daten/Casino.txt') as casinof:
-        rolls, die, _ = casinof.read().split('\n')
+        rolls, die, check = casinof.read().split('\n')
 
     # create the HHM
     states = ('Fair', 'Loaded')
 
     observations = (i for i in range(1, 7))
 
-    start_probability = {'Fair': 1, 'Loaded': 0}
+    start_probability = {'Fair': 0.95, 'Loaded': 0.05}
 
     transition_probability = {
         'Fair':   {'Fair': 0.95, 'Loaded': 0.05},
@@ -58,18 +58,20 @@ def main():
         emission_probability
     )
 
-    # print the DNA sequence
+    # print the the output
     last = 0
-    LINE_LENGTH = 80
+    LINE_LENGTH = 50
     for i in range(LINE_LENGTH, len(path), LINE_LENGTH):
         print('rolls:', rolls[last:i])
         print('dice: ', die[last:i])
         print('viter:', ''.join(s[0] for s in path)[last:i])
+        print('check:', check[last:i])
         print()
         last = i
     else:
         print('rolls:', rolls[last:])
         print('dice: ', die[last:])
         print('viter:', ''.join(s[0] for s in path)[last:])
+        print('check:', check[last:])
 
 main()

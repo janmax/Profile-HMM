@@ -2,9 +2,8 @@
 try:
     from numba import jit
     import numpy as np
-    np.set_printoptions(linewidth=140, precision=4)
 except ImportError:
-    print('Seems you do not have numpy or numba. Too bad - Exiting...')
+    print('[Error] Seems you do not have numpy or numba. Too bad - Exiting...')
 
 # python modules
 from collections import Counter
@@ -26,6 +25,7 @@ class HMM:
         self.match_states = self.calc_match_states()
         self.n = Counter(self.match_states)[True]
 
+        # Calculating/guessing the probabilities
         self.transmissions = self.calc_transmissions()
         self.emissions_from_M, self.emissions_from_I = self.calc_emissons()
 
@@ -59,21 +59,29 @@ class HMM:
         for i in range(N):
             for j in range(1, L+1):
                 V_M[i, j] = log(e_M[x[i]][j-1] / q) + \
-                    max(V_M[i-1][j-1] + log(a[0][j-1]),
-                        V_I[i-1][j-1] + log(a[1][j-1]),
-                        V_D[i-1][j-1] + log(a[2][j-1]))
+                    max(V_M[i-1][j-1] + log(a[0][j-1]), # M->M
+                        V_I[i-1][j-1] + log(a[1][j-1]), # M->D
+                        V_D[i-1][j-1] + log(a[2][j-1])) # M->I
 
                 V_I[i, j] = log(e_I[x[i]][j-1] / q) + \
-                    max(V_M[i-1][j] + log(a[3][j]),
-                        V_I[i-1][j] + log(a[4][j]),
-                        V_D[i-1][j] + log(a[5][j]))
+                    max(V_M[i-1][j] + log(a[3][j]), # I->M
+                        V_I[i-1][j] + log(a[4][j]), # I->I
+                        V_D[i-1][j] + log(a[5][j])) # I->D
 
-                V_D[i, j] = max(V_M[i][j-1] + log(a[6][j-1]),
-                                V_I[i][j-1] + log(a[7][j-1]),
-                                V_D[i][j-1] + log(a[8][j-1]))
+                V_D[i, j] = max(V_M[i][j-1] + log(a[6][j-1]), # D->M
+                                V_I[i][j-1] + log(a[7][j-1]), # D->D
+                                V_D[i][j-1] + log(a[8][j-1])) # D->I
 
         return max(V_M[N-1, L], V_I[N-1, L], V_D[N-1, L])
 
+    def score(self, viterbi_scores):
+        return self._score(np.array(viterbi_scores))
+
+    @staticmethod
+    @jit(nopython=True)
+    def _score(viterbi_scores, threshold=0.8):
+        return viterbi_scores > np.amin(viterbi_scores) + \
+            abs(np.amax(viterbi_scores) - np.amin(viterbi_scores)) * threshold
 
     def calc_match_states(self):
         # Applying the 50% rule
@@ -180,8 +188,8 @@ class HMM:
                     ['I->I',        'I->M']):
                     transmissions[transm][match_index] += transmission_count[booltrans]
 
-            # well everyone has to return sometime. don't forget to increase the
-            # match index
+            # returning from insert state to match state don't forget to
+            # increase the match index
             if not match and match_next:
                 for booltrans, transm in zip(
                     [(True, True), (True, False)],
