@@ -4,6 +4,20 @@ from sys import exit
 np.set_printoptions(linewidth=14000000, precision=4, threshold=1000000)
 
 
+def _plot(y):
+    import matplotlib.pyplot as plt
+    for data, c, marker in zip(y, 'ACGU', 'xo.v'):
+        data = data[:100]
+        plt.plot(np.arange(len(data)), data, label=c, marker=marker, ls='None')
+
+    plt.xlabel('Match state number')
+    plt.ylabel('Propabilities')
+    plt.legend(loc='upper right')
+    # plt.yscale('log')
+
+    plt.show()
+
+
 def read(rfile):
     MSA = []
     with rfile as train_data:
@@ -42,7 +56,8 @@ with testdata as full:
     for line in full.readlines():
         if line.startswith('>'):
             continue
-        print('[{} of {}] in progress..'.format(len(index), num_lines), end='\r')
+        print('[{} of {}] in progress..'.format(
+            len(index), num_lines), end='\r')
         index.append(len(index) + 1)
         seq_start.append(line[:30])
         scores.append(HMM_MSA.viterbi(line))

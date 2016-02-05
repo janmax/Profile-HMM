@@ -74,12 +74,12 @@ class HMM:
 
         return max(V_M[N-1, L], V_I[N-1, L], V_D[N-1, L])
 
-    def score(self, viterbi_scores):
-        return self._score(np.array(viterbi_scores))
+    def score(self, viterbi_scores, threshold=0.8):
+        return self._score(np.array(viterbi_scores), threshold)
 
     @staticmethod
     @jit(nopython=True)
-    def _score(viterbi_scores, threshold=0.8):
+    def _score(viterbi_scores, threshold):
         return viterbi_scores > np.amin(viterbi_scores) + \
             abs(np.amax(viterbi_scores) - np.amin(viterbi_scores)) * threshold
 
