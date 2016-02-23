@@ -1,0 +1,11 @@
+Profile Hidden Markov Model for MSA
+
+This repository contains a Python3.5 module for creating a profile HMM from a
+MSA presented in fasta format. The class supports scoring testdata against the
+created model (with multicore support) or just prints out statistical
+information about the MSA alignment. The depth of these information should be
+improved tough.
+
+The usage is very simple and can be looked up via invoking python3 main.py -h.
+
+Dependencies are Numpy and Numba.
