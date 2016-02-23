@@ -1,4 +1,5 @@
 from ProfileHMM.ProfileHMM import *
+from multiprocessing import Pool, TimeoutError
 from sys import exit
 
 np.set_printoptions(linewidth=14000000, precision=4, threshold=1000000)
@@ -27,6 +28,14 @@ def read(rfile):
             MSA.append(np.array(list(line.strip())))
     return np.array(MSA)
 
+
+def testdata_iter(testdata):
+    for line in testdata.readlines():
+        if line.startswith('>'):
+            continue
+        yield line
+    testdata.seek(0)
+
 traindata, testdata, out = parseme()
 
 # read drom fasta data and set some basic values
@@ -38,30 +47,30 @@ HMM_MSA = HMM(MSA)
 
 print("[Info] HMM ready. ")
 if not testdata:
-    print("[Info] No testdata provided. Just printing probabilities to:", out.name)
+    print(
+        "[Info] No testdata provided. Just printing probabilities to:", out.name)
     print(HMM_MSA.emissions_from_M, file=out)
     print("[Info] We are done. Bye.")
     exit()
 
 print("[Info] Start scoring test data...")
 
-with testdata as full:
-    # fancy stuff
-    num_lines = sum(1 for line in testdata) // 2 - 1
-    testdata.seek(0)
 
-    index = []
-    seq_start = []
-    scores = []
-    for line in full.readlines():
-        if line.startswith('>'):
-            continue
-        print('[{} of {}] in progress..'.format(
-            len(index), num_lines), end='\r')
-        index.append(len(index) + 1)
-        seq_start.append(line[:30])
-        scores.append(HMM_MSA.viterbi(line))
-    print('\n[Info] Completed')
+index = []
+scores = []
+seq_start = [line[:30] for line in testdata_iter(testdata)]
+num_lines = sum(1 for line in testdata) // 2 - 1
+testdata.seek(0)
+
+with Pool() as pool:
+    for i, score in enumerate(
+            pool.imap(HMM_MSA.viterbi, testdata_iter(testdata))):
+        print('[{} of {}] in progress..'.format(i, num_lines), end='\r')
+        index.append(i)
+        scores.append(score)
+    print()
+
+print('[Info] Scoring completed')
 
 positiv = np.array(HMM_MSA.score(scores), dtype=int)
 
